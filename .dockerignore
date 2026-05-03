@@ -1,0 +1,15 @@
+.env
+.git
+.gitignore
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+pgdata
+.idea
+.vscode
+*.md
+!README.md
+external/
+tests/

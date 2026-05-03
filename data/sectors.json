@@ -1,0 +1,23 @@
+{
+  "Financial Services": ["Banking", "Insurance", "NBFC", "Capital Markets"],
+  "Information Technology": ["IT Services", "Software Products"],
+  "Healthcare": ["Pharmaceuticals", "Hospitals", "Diagnostics"],
+  "Automobile and Auto Components": ["Passenger Vehicles", "Commercial Vehicles", "Auto Ancillaries"],
+  "Fast Moving Consumer Goods": ["Food Products", "Personal Care", "Household Products"],
+  "Consumer Durables": ["Electronics", "Appliances", "Jewellery"],
+  "Capital Goods": ["Industrial Machinery", "Electrical Equipment"],
+  "Oil Gas & Consumable Fuels": ["Exploration", "Refining", "Distribution"],
+  "Metals & Mining": ["Steel", "Aluminium", "Mining"],
+  "Construction Materials": ["Cement", "Building Materials"],
+  "Construction": ["Infrastructure", "Real Estate Development"],
+  "Chemicals": ["Specialty Chemicals", "Petrochemicals", "Agrochemicals"],
+  "Power": ["Generation", "Transmission", "Distribution"],
+  "Telecommunication": ["Telecom Services", "Tower Companies"],
+  "Realty": ["Residential", "Commercial", "REITs"],
+  "Services": ["IT Enabled Services", "BPO"],
+  "Consumer Services": ["Hotels", "Restaurants", "Media"],
+  "Textiles": ["Yarn", "Fabrics", "Garments"],
+  "Diversified": ["Conglomerates"],
+  "Media Entertainment & Publication": ["Broadcasting", "Print", "Digital Media"],
+  "Forest Materials": ["Paper", "Packaging"]
+}
