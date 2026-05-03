@@ -345,7 +345,7 @@ async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "⚠️ *Kite Connect not authenticated*\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n"
                 "You need to login to Zerodha first (once per day):\n\n"
-                f"1️⃣ Open in browser:\n`http://localhost:5000/kite/login`\n\n"
+                f"1️⃣ Open in browser:\n`{settings.base_url}/kite/login`\n\n"
                 "2️⃣ Login with your Zerodha credentials\n\n"
                 "3️⃣ After login, come back and run /sync again\n"
                 "━━━━━━━━━━━━━━━━━━━━━━",

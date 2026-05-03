@@ -1,0 +1,31 @@
+name: Deploy to Oracle Cloud
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to OCI via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USERNAME }}
+          key: ${{ secrets.OCI_KEY }}
+          script: |
+            cd ~/kuber-bot
+
+            # Pull latest code
+            git pull origin main
+
+            # Rebuild and restart
+            docker compose up -d --build
+
+            # Pull the Ollama model (runs in background, idempotent)
+            docker exec kuber-ollama ollama pull gemma4:e2b || true
+
+            # Clean up old images
+            docker image prune -f

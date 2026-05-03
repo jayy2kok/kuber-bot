@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     bulk_deal_hour: int = Field(default=16, description="Hour (IST) for bulk deal check")
 
     # ── Server ────────────────────────────────────────────────────────
+    base_url: str = Field(
+        default="https://kuber-bot.duckdns.org",
+        description="Public-facing base URL for OAuth callbacks and Telegram links",
+    )
     host: str = Field(default="0.0.0.0", description="FastAPI bind host")
     port: int = Field(default=5000, description="FastAPI bind port")
 

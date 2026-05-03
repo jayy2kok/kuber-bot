@@ -317,7 +317,7 @@ async def sync_holdings_from_kite() -> int:
     if not is_authenticated():
         logger.warning(
             "Kite not authenticated — login first via /kite/login or "
-            "http://localhost:5000/kite/login"
+            f"{settings.base_url}/kite/login"
         )
         return -1  # -1 = not authenticated (distinct from 0 = no holdings)
 

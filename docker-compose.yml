@@ -9,8 +9,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fbot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_strong_password}
       POSTGRES_DB: ${POSTGRES_DB:-fbot}
-    ports:
-      - "5432:5432"
+    expose:
+      - "5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,25 +25,53 @@ services:
       -c effective_cache_size=256MB
       -c work_mem=4MB
       -c max_connections=20
+    networks:
+      - picklepro-network
+
+  # ---- Ollama LLM (sentiment analysis) ----
+  ollama:
+    image: ollama/ollama:latest
+    container_name: kuber-ollama
+    restart: unless-stopped
+    expose:
+      - "11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - picklepro-network
 
   # ---- FBot Application ----
   fbot:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: kuber-fbot
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+      ollama:
+        condition: service_started
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-fbot}:${POSTGRES_PASSWORD:-changeme_strong_password}@db:5432/${POSTGRES_DB:-fbot}
-    ports:
-      - "5000:5000"
+      OLLAMA_BASE_URL: http://ollama:11434
+    expose:
+      - "5000"
     volumes:
       - ./data:/app/data
+    networks:
+      - picklepro-network
 
 volumes:
   pgdata:
     driver: local
+  ollama_data:
+    driver: local
+
+# Join the existing picklepro network so nginx can proxy to fbot
+networks:
+  picklepro-network:
+    external: true
+    name: picklepro_picklepro-network
