@@ -31,13 +31,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash fbot
+
 # Copy application code
 COPY src/ ./src/
 COPY data/ ./data/
 COPY alembic.ini ./
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash fbot
+# Ensure data dir is writable by fbot (for bind-mounted volume)
+RUN chown -R fbot:fbot /app/data
+
 USER fbot
 
 # Health check
