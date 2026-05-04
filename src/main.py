@@ -56,6 +56,9 @@ class HealthCheckFilter(logging.Filter):
         if record.getMessage().find("GET /health") != -1:
             record.levelno = logging.DEBUG
             record.levelname = "DEBUG"
+            # Uvicorn's access handler prints everything by default, 
+            # so we manually drop it unless the app is in DEBUG mode.
+            return settings.log_level.upper() == "DEBUG"
         return True
 
 logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
