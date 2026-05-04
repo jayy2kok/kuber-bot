@@ -51,6 +51,15 @@ structlog.configure(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.getMessage().find("GET /health") != -1:
+            record.levelno = logging.DEBUG
+            record.levelname = "DEBUG"
+        return True
+
+logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
+
 logger = logging.getLogger(__name__)
 
 
