@@ -75,6 +75,10 @@ class Settings(BaseSettings):
         default=5.0,
         description="Max % deviation between CMP and entry price; skip if exceeded",
     )
+    min_risk_reward: float = Field(
+        default=1.0,
+        description="Minimum Risk/Reward ratio to qualify; below this means risk > reward",
+    )
 
     # ── Scheduling ────────────────────────────────────────────────────
     full_scan_hour: int = Field(default=6, description="Hour (IST) for full daily scan")

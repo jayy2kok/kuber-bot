@@ -35,6 +35,31 @@ SIGNAL_LABEL = {
 }
 
 
+def _classify_risk_reward(rr: float) -> tuple[str, str]:
+    """
+    Classify Risk/Reward ratio into a human-readable label and emoji.
+
+    R:R Ranges:
+      ≥ 2.0  → Excellent  (you stand to gain 2× what you risk)
+      ≥ 1.5  → Good       (reward clearly outweighs risk)
+      ≥ 1.0  → Fair       (reward equals risk — borderline)
+      ≥ 0.5  → Poor       (risking more than you gain)
+      < 0.5  → Avoid      (risk far outweighs reward)
+
+    Returns: (label, emoji)
+    """
+    if rr >= 2.0:
+        return "Excellent ✨", "⚖️"
+    elif rr >= 1.5:
+        return "Good 👍", "⚖️"
+    elif rr >= 1.0:
+        return "Fair ⚠️", "⚖️"
+    elif rr >= 0.5:
+        return "Poor 👎", "⚠️"
+    else:
+        return "Avoid ❌", "🚫"
+
+
 def format_recommendation_card(
     rec: Recommendation, stock_symbol: str, stock_name: str,
     institutional_deals: list | None = None,
@@ -92,9 +117,16 @@ def format_recommendation_card(
         ])
         if rec.target_2:
             lines.append(f"🎯 Target 2: ₹{rec.target_2:,.2f} ({t2_pct:+.0f}%)")
+
+        # Risk/Reward with clear guidance
+        risk_per_share = abs(rec.entry_price - rec.stop_loss) if rec.entry_price and rec.stop_loss else 0
+        reward_per_share = abs(rec.target_1 - rec.entry_price) if rec.entry_price else 0
+        rr_label, rr_icon = _classify_risk_reward(rec.risk_reward)
+
         lines.extend([
             f"🛑 Stop Loss: ₹{rec.stop_loss:,.2f} ({sl_pct:+.0f}%)",
-            f"⚖️ Risk/Reward: {rec.risk_reward:.2f}",
+            f"{rr_icon} Risk/Reward: 1:{rec.risk_reward:.2f} — {rr_label}",
+            f"   ↕️ Risk ₹{risk_per_share:,.0f} → Reward ₹{reward_per_share:,.0f} per share",
         ])
 
     lines.extend([

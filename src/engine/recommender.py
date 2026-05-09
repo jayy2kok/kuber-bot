@@ -594,6 +594,7 @@ async def run_full_scan() -> list[Recommendation]:
     skip_tech_hard_filter = 0
     skip_pre_score = 0
     skip_cmp_entry_deviation = 0
+    skip_low_rr = 0
 
     for stock in stocks:
         try:
@@ -667,6 +668,16 @@ async def run_full_scan() -> list[Recommendation]:
                     if not is_held:
                         continue
 
+            # Risk/Reward filter — skip if risk outweighs reward
+            if tech_result and tech_result.targets.risk_reward < settings.min_risk_reward:
+                skip_low_rr += 1
+                logger.debug(
+                    f"Skipping {stock.symbol}: R:R {tech_result.targets.risk_reward:.2f} "
+                    f"< min {settings.min_risk_reward}"
+                )
+                if not is_held:
+                    continue
+
             candidates.append({
                 "stock": stock,
                 "fund_result": fund_result,
@@ -685,7 +696,8 @@ async def run_full_scan() -> list[Recommendation]:
         f"Pre-filter: {len(candidates)} candidates passed (threshold={PRE_SCORE_THRESHOLD}). "
         f"Dropped: no_fundamental={skip_no_fundamental}, no_prices(<200d)={skip_no_prices}, "
         f"fund_hard_filter={skip_fund_hard_filter}, tech_hard_filter={skip_tech_hard_filter}, "
-        f"pre_score_low={skip_pre_score}, cmp_entry_deviation={skip_cmp_entry_deviation}"
+        f"pre_score_low={skip_pre_score}, cmp_entry_deviation={skip_cmp_entry_deviation}, "
+        f"low_rr={skip_low_rr}"
     )
 
     # ── Step 2: Sentiment enrichment (ONLY for shortlisted) ──
