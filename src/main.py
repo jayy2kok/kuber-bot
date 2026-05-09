@@ -243,6 +243,13 @@ async def kite_callback(request_token: str = Query(...), status: str = Query(def
             except Exception as e:
                 logger.warning(f"Failed to send Telegram login notification: {e}")
 
+            # Run any pending actions that were waiting for Kite login (e.g. /digest)
+            try:
+                from src.bot.handler import run_pending_post_login_actions
+                await run_pending_post_login_actions(bot)
+            except Exception as e:
+                logger.warning(f"Failed to run pending post-login actions: {e}")
+
         # Return a nice auto-closing HTML page
         return HTMLResponse(content=f"""
         <!DOCTYPE html>

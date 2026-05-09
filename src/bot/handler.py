@@ -44,6 +44,9 @@ from src.bot.formatters import (
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# Pending actions that wait for Kite login before executing
+_pending_after_login: set[str] = set()
+
 
 # ─── Inline Keyboard Builder ─────────────────────────────────────────────────
 
@@ -273,8 +276,45 @@ async def cmd_holdings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /digest command — show today's recommendations."""
-    await deliver_daily_digest(context.bot)
+    """
+    Handle /digest command — show today's recommendations.
+
+    Requires Kite login for live prices. If not authenticated,
+    sends a login link and queues digest to run automatically
+    after successful login.
+    """
+    if not settings.has_kite:
+        # No Kite configured — just send digest with stale prices
+        await deliver_daily_digest(context.bot)
+        return
+
+    from src.trading.kite_client import is_authenticated
+
+    if is_authenticated():
+        # Already logged in — deliver immediately with live prices
+        await deliver_daily_digest(context.bot)
+        return
+
+    # Not authenticated — send login link and queue digest
+    _pending_after_login.add("digest")
+
+    from src.trading.kite_client import get_login_url
+    login_url = get_login_url()
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔐 Login to Zerodha", url=login_url)]
+    ])
+
+    await update.message.reply_text(
+        "🔐 *Login Required for Live Prices*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Digest needs live market prices from Zerodha.\n\n"
+        "1️⃣ Tap the button below to login\n"
+        "2️⃣ After login, your digest will be sent automatically\n"
+        "━━━━━━━━━━━━━━━━━━━━━━",
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+    )
 
 
 async def cmd_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -794,6 +834,34 @@ async def send_error_alert(bot, error_type: str, message: str) -> None:
         logger.error(f"Failed to send error alert: {e}")
 
 
+async def run_pending_post_login_actions(bot) -> None:
+    """
+    Execute any commands that were queued pending Kite login.
+
+    Called from the Kite OAuth callback (main.py) after successful authentication.
+    """
+    global _pending_after_login
+
+    if not _pending_after_login:
+        return
+
+    pending = _pending_after_login.copy()
+    _pending_after_login.clear()
+
+    logger.info(f"Running {len(pending)} pending post-login actions: {pending}")
+
+    for action in pending:
+        try:
+            if action == "digest":
+                await bot.send_message(
+                    chat_id=settings.telegram_chat_id,
+                    text="✅ Zerodha login detected! Sending your digest with live prices...",
+                )
+                await deliver_daily_digest(bot)
+            else:
+                logger.warning(f"Unknown pending action: {action}")
+        except Exception as e:
+            logger.error(f"Failed to execute pending action '{action}': {e}")
 
 
 # ─── Bot Application Builder ─────────────────────────────────────────────────

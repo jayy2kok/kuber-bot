@@ -177,6 +177,9 @@ async def job_daily_digest():
 
     Reads deliverable recommendations from today's scan and sends them
     using the Telegram bot.
+
+    If Kite is configured but not authenticated, sends a login link
+    and queues the digest to auto-deliver after login.
     """
     logger.info("📊 Preparing daily digest...")
 
@@ -186,9 +189,42 @@ async def job_daily_digest():
 
     try:
         from telegram import Bot
-        from src.bot.handler import deliver_daily_digest
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from src.bot.handler import deliver_daily_digest, _pending_after_login
 
         bot = Bot(token=settings.telegram_bot_token)
+
+        # If Kite is configured, check auth before sending digest
+        if settings.has_kite:
+            from src.trading.kite_client import is_authenticated
+            if not is_authenticated():
+                # Queue digest for after login and send login link
+                _pending_after_login.add("digest")
+
+                from src.trading.kite_client import get_login_url
+                login_url = get_login_url()
+
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔐 Login to Zerodha", url=login_url)]
+                ])
+
+                await bot.send_message(
+                    chat_id=settings.telegram_chat_id,
+                    text=(
+                        "📊 *Daily Digest Ready*\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "Data ingestion complete ✅\n"
+                        "Login to Zerodha to get recommendations\n"
+                        "with live market prices.\n\n"
+                        "Digest will be sent automatically after login.\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━"
+                    ),
+                    parse_mode="Markdown",
+                    reply_markup=keyboard,
+                )
+                logger.info("Kite not authenticated — digest queued pending login")
+                return
+
         await deliver_daily_digest(bot)
         logger.info("📊 Daily digest delivered via Telegram")
     except Exception as e:

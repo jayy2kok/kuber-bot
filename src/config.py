@@ -71,6 +71,10 @@ class Settings(BaseSettings):
         default=60,
         description="Minimum composite score to qualify as a recommendation",
     )
+    max_cmp_entry_deviation_pct: float = Field(
+        default=5.0,
+        description="Max % deviation between CMP and entry price; skip if exceeded",
+    )
 
     # ── Scheduling ────────────────────────────────────────────────────
     full_scan_hour: int = Field(default=6, description="Hour (IST) for full daily scan")

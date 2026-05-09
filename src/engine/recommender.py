@@ -454,7 +454,17 @@ async def analyze_single_stock(stock: Stock) -> Optional[Recommendation]:
     if df is None or df.empty:
         logger.warning(f"No price data for {stock.symbol}")
         return None
-    cmp = float(df.iloc[-1]["Close"])
+
+    # Use live Kite LTP if authenticated, otherwise fall back to DB close
+    db_close = float(df.iloc[-1]["Close"])
+    try:
+        from src.trading.kite_client import fetch_ltp
+        live_price = await fetch_ltp(stock.symbol)
+        cmp = live_price if live_price else db_close
+        if live_price:
+            logger.info(f"Using live Kite LTP for {stock.symbol}: ₹{cmp:.2f} (DB close: ₹{db_close:.2f})")
+    except Exception:
+        cmp = db_close
 
     # ── Fundamental ──
     fundamental = await _get_latest_fundamental(stock.id)
@@ -559,9 +569,19 @@ async def run_full_scan() -> list[Recommendation]:
     held_symbols = await _get_held_symbols()
     inst_signals = await get_all_institutional_signals(lookback_days=30)
 
+    # Fetch live prices from Kite API (if authenticated)
+    live_prices: dict[str, float] = {}
+    try:
+        from src.trading.kite_client import fetch_ltp_batch
+        all_symbols = [s.symbol for s in stocks]
+        live_prices = await fetch_ltp_batch(all_symbols)
+    except Exception as e:
+        logger.warning(f"Kite LTP batch fetch failed, using DB close prices: {e}")
+
     logger.info(
         f"Scanning {len(stocks)} stocks, {len(held_symbols)} held, "
-        f"{len(inst_signals)} with institutional data"
+        f"{len(inst_signals)} with institutional data, "
+        f"{len(live_prices)} with live Kite prices"
     )
 
     # ── Step 1: Pre-filter (fundamental + technical + institutional) ──
@@ -573,6 +593,7 @@ async def run_full_scan() -> list[Recommendation]:
     skip_fund_hard_filter = 0
     skip_tech_hard_filter = 0
     skip_pre_score = 0
+    skip_cmp_entry_deviation = 0
 
     for stock in stocks:
         try:
@@ -583,7 +604,10 @@ async def run_full_scan() -> list[Recommendation]:
             if df is None or df.empty:
                 skip_no_prices += 1
                 continue
-            cmp = float(df.iloc[-1]["Close"])
+
+            # Use live Kite LTP if available, otherwise DB close
+            db_close = float(df.iloc[-1]["Close"])
+            cmp = live_prices.get(stock.symbol, db_close)
 
             # Fundamental analysis
             fundamental = await _get_latest_fundamental(stock.id)
@@ -630,6 +654,19 @@ async def run_full_scan() -> list[Recommendation]:
                 if not is_held:
                     continue
 
+            # CMP-vs-Entry deviation filter — skip if CMP is too far from entry
+            if tech_result and tech_result.targets.entry > 0:
+                entry = tech_result.targets.entry
+                deviation_pct = abs(cmp - entry) / entry * 100
+                if deviation_pct > settings.max_cmp_entry_deviation_pct:
+                    skip_cmp_entry_deviation += 1
+                    logger.debug(
+                        f"Skipping {stock.symbol}: CMP ₹{cmp:.2f} vs Entry ₹{entry:.2f} "
+                        f"({deviation_pct:.1f}% deviation > {settings.max_cmp_entry_deviation_pct}%)"
+                    )
+                    if not is_held:
+                        continue
+
             candidates.append({
                 "stock": stock,
                 "fund_result": fund_result,
@@ -648,7 +685,7 @@ async def run_full_scan() -> list[Recommendation]:
         f"Pre-filter: {len(candidates)} candidates passed (threshold={PRE_SCORE_THRESHOLD}). "
         f"Dropped: no_fundamental={skip_no_fundamental}, no_prices(<200d)={skip_no_prices}, "
         f"fund_hard_filter={skip_fund_hard_filter}, tech_hard_filter={skip_tech_hard_filter}, "
-        f"pre_score_low={skip_pre_score}"
+        f"pre_score_low={skip_pre_score}, cmp_entry_deviation={skip_cmp_entry_deviation}"
     )
 
     # ── Step 2: Sentiment enrichment (ONLY for shortlisted) ──

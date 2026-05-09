@@ -94,6 +94,75 @@ def is_authenticated() -> bool:
         return False
 
 
+# ─── Live Price Fetching ─────────────────────────────────────────────────────
+
+
+async def fetch_ltp(symbol: str) -> Optional[float]:
+    """
+    Fetch the Last Traded Price (LTP) for a single stock from Kite.
+
+    Returns the LTP as a float, or None if Kite is not authenticated
+    or the request fails.
+
+    Uses the format: kite.ltp("NSE:SYMBOL") -> {"NSE:SYMBOL": {"last_price": ...}}
+    """
+    if not is_authenticated():
+        return None
+
+    kite = _get_kite_instance()
+    instrument = f"NSE:{symbol}"
+
+    try:
+        data = await asyncio.to_thread(kite.ltp, instrument)
+        if instrument in data:
+            return float(data[instrument]["last_price"])
+    except Exception as e:
+        logger.debug(f"LTP fetch failed for {symbol}: {e}")
+
+    return None
+
+
+async def fetch_ltp_batch(symbols: list[str]) -> dict[str, float]:
+    """
+    Fetch LTP for multiple stocks from Kite in batches.
+
+    Kite API allows up to ~200 instruments per call.
+    We batch in groups of 50 to be safe.
+
+    Args:
+        symbols: List of NSE symbols (e.g. ["RELIANCE", "INFY", ...])
+
+    Returns:
+        Dict mapping symbol -> last_price. Missing symbols are omitted.
+    """
+    if not is_authenticated():
+        return {}
+
+    kite = _get_kite_instance()
+    result = {}
+    batch_size = 50
+
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i : i + batch_size]
+        instruments = [f"NSE:{s}" for s in batch]
+
+        try:
+            data = await asyncio.to_thread(kite.ltp, *instruments)
+            for sym in batch:
+                key = f"NSE:{sym}"
+                if key in data and "last_price" in data[key]:
+                    result[sym] = float(data[key]["last_price"])
+        except Exception as e:
+            logger.warning(f"LTP batch fetch failed for batch starting at {i}: {e}")
+
+        # Small delay between batches to avoid rate limiting
+        if i + batch_size < len(symbols):
+            await asyncio.sleep(0.2)
+
+    logger.info(f"Fetched live LTP for {len(result)}/{len(symbols)} stocks from Kite")
+    return result
+
+
 # ─── P5.2 Order Placement ────────────────────────────────────────────────────
 
 
