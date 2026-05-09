@@ -36,6 +36,9 @@ RSS_FEEDS = {
     "LiveMint": "https://www.livemint.com/rss/markets",
 }
 
+# NSE Corporate Actions feed (separate parser due to unique format)
+NSE_CORPORATE_ACTIONS_URL = "https://nsearchives.nseindia.com/content/RSS/Corporate_action.xml"
+
 
 async def fetch_rss_articles(
     feed_name: str, feed_url: str
@@ -111,6 +114,146 @@ async def fetch_all_rss() -> list[dict]:
 
     logger.info(f"Fetched {len(all_articles)} articles from {len(RSS_FEEDS)} RSS feeds")
     return all_articles
+
+
+# ─── Corporate Action Sentiment Mapping ──────────────────────────────────────
+
+# Map corporate action types to sentiment impact for the LLM context
+CORPORATE_ACTION_SENTIMENT = {
+    "DIVIDEND":          "positive — company rewarding shareholders",
+    "INTERIM DIVIDEND":  "positive — mid-year dividend signals strong cash flow",
+    "SPECIAL DIVIDEND":  "positive — exceptional payout shows surplus profits",
+    "BONUS":             "positive — bonus issue signals management confidence",
+    "SPLIT":             "neutral to positive — stock split improves liquidity",
+    "RIGHTS":            "neutral — rights issue may dilute but funds growth",
+    "BUYBACK":           "positive — buyback signals undervaluation by management",
+    "MERGER":            "uncertain — needs analysis of merger terms",
+    "DEMERGER":          "uncertain — needs analysis of demerger terms",
+    "AMALGAMATION":      "uncertain — needs analysis of terms",
+    "AGM":               "neutral — routine annual general meeting",
+    "EGM":               "neutral to noteworthy — extraordinary meeting may signal change",
+}
+
+
+def _classify_corporate_action(purpose: str) -> tuple[str, str]:
+    """
+    Classify a corporate action purpose string.
+
+    Returns (action_type, sentiment_hint).
+    """
+    purpose_upper = purpose.upper()
+    for action_key, sentiment in CORPORATE_ACTION_SENTIMENT.items():
+        if action_key in purpose_upper:
+            return action_key, sentiment
+    return "OTHER", "neutral — unclassified corporate action"
+
+
+async def fetch_corporate_actions() -> list[dict]:
+    """
+    Fetch and parse NSE corporate actions RSS feed.
+
+    Returns articles with enriched title/summary that includes
+    the action type, amounts, and ex-date for sentiment analysis.
+
+    Example output article:
+        title: "BAJFINANCE: DIVIDEND - RS 6 PER SHARE (Ex-Date: 30-Jun-2026)"
+        summary: "Corporate Action: DIVIDEND - RS 6 PER SHARE | Face Value: 500 |
+                  Record Date: 30-Jun-2026 | Sentiment: positive — company
+                  rewarding shareholders"
+    """
+    articles = []
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; FBot/1.0)",
+                "Accept": "application/xml, text/xml",
+            },
+        ) as client:
+            response = await client.get(NSE_CORPORATE_ACTIONS_URL)
+            response.raise_for_status()
+
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(response.text)
+        items = root.findall(".//item")
+
+        for item in items:
+            raw_title = item.findtext("title", "").strip()
+            description = item.findtext("description", "").strip()
+            pub_date_str = item.findtext("pubDate", "").strip()
+
+            if not raw_title or not description:
+                continue
+
+            # Extract company name from title: "Bajaj Finance Limited - Ex-Date: 30-Jun-2026"
+            company_name = raw_title.split(" - Ex-Date:")[0].strip() if " - Ex-Date:" in raw_title else raw_title
+
+            # Parse description: "SERIES:EQ |PURPOSE:DIVIDEND - RS 6 |FACE VALUE:500 |RECORD DATE:..."
+            fields = {}
+            for part in description.split("|"):
+                part = part.strip()
+                if ":" in part:
+                    key, _, value = part.partition(":")
+                    fields[key.strip().upper()] = value.strip()
+
+            purpose = fields.get("PURPOSE", "")
+            face_value = fields.get("FACE VALUE", "")
+            record_date = fields.get("RECORD DATE", "")
+            ex_date = ""
+            if " - Ex-Date:" in raw_title:
+                ex_date = raw_title.split(" - Ex-Date:")[1].strip()
+
+            action_type, sentiment_hint = _classify_corporate_action(purpose)
+
+            # Build enriched title and summary for sentiment analysis
+            enriched_title = f"{company_name}: {purpose}"
+            if ex_date:
+                enriched_title += f" (Ex-Date: {ex_date})"
+
+            enriched_summary = (
+                f"Corporate Action: {purpose}"
+                f" | Face Value: {face_value}"
+                f" | Record Date: {record_date}"
+                f" | Action Type: {action_type}"
+                f" | Sentiment Hint: {sentiment_hint}"
+            )
+
+            # Parse published date (NSE format: DD-Mon-YYYY HH:MM:SS)
+            pub_date = None
+            if pub_date_str:
+                for fmt in [
+                    "%d-%b-%Y %H:%M:%S",
+                    "%d-%B-%Y %H:%M:%S",
+                    "%d-%m-%Y %H:%M:%S",
+                ]:
+                    try:
+                        pub_date = datetime.strptime(pub_date_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+
+            # Build a unique URL using company + purpose to avoid dedup issues
+            # (NSE RSS uses the same link for all items)
+            import hashlib
+            url_hash = hashlib.md5(f"{company_name}:{purpose}:{ex_date}".encode()).hexdigest()[:12]
+            unique_url = f"https://nsearchives.nseindia.com/corporate-action/{url_hash}"
+
+            articles.append({
+                "title": enriched_title,
+                "url": unique_url,
+                "source": "NSE Corporate Actions",
+                "summary": enriched_summary,
+                "published_at": pub_date,
+                "_company_name": company_name,  # Extra field for symbol matching
+            })
+
+        logger.info(f"Fetched {len(articles)} corporate actions from NSE RSS")
+    except Exception as e:
+        logger.warning(f"Failed to fetch NSE corporate actions RSS: {e}")
+
+    return articles
+
 
 
 async def fetch_newsapi_articles(query: str = "Indian stock market") -> list[dict]:
@@ -255,7 +398,8 @@ async def fetch_and_store_news() -> int:
     # Fetch from all sources
     rss_articles = await fetch_all_rss()
     newsapi_articles = await fetch_newsapi_articles()
-    all_articles = rss_articles + newsapi_articles
+    corporate_actions = await fetch_corporate_actions()
+    all_articles = rss_articles + newsapi_articles + corporate_actions
 
     if not all_articles:
         return 0
@@ -279,9 +423,12 @@ async def fetch_and_store_news() -> int:
                 continue
 
             # Match article to stock symbols
+            # Corporate actions have a pre-extracted company name for better matching
             match_text = article["title"]
             if article.get("summary"):
                 match_text += " " + article["summary"]
+            if article.get("_company_name"):
+                match_text += " " + article["_company_name"]
 
             matched_symbols = _match_symbols(match_text, stock_lookup) if stock_lookup else []
 
