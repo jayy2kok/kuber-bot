@@ -60,9 +60,28 @@ def _classify_risk_reward(rr: float) -> tuple[str, str]:
         return "Avoid ❌", "🚫"
 
 
+def _get_title(article) -> str:
+    """Extract title from an article (ORM object or dict)."""
+    if hasattr(article, 'title'):
+        return article.title or ""
+    if isinstance(article, dict):
+        return article.get('title', '')
+    return str(article)
+
+
+def _get_source(article) -> str:
+    """Extract source from an article (ORM object or dict)."""
+    if hasattr(article, 'source'):
+        return article.source or ""
+    if isinstance(article, dict):
+        return article.get('source', '')
+    return ""
+
+
 def format_recommendation_card(
     rec: Recommendation, stock_symbol: str, stock_name: str,
     institutional_deals: list | None = None,
+    news_articles: list | None = None,
 ) -> str:
     """
     Format a single recommendation as a Telegram message card.
@@ -77,13 +96,18 @@ def format_recommendation_card(
     🎯 Target 1: ₹2,904.00 (+20%)
     🎯 Target 2: ₹3,267.00 (+35%)
     🛑 Stop Loss: ₹2,057.00
-    ⚖️ Risk/Reward: 2.40
+    ⚖️ Risk/Reward: 1:2.40 — Excellent ✨
 
     📊 Score: 82/100
     📈 Fund: 75 | Tech: 87 | Inst: 70
     🕐 Horizon: Medium Term
 
-    💡 Excellent fundamentals with strong...
+    📰 Recent News:
+      • Reliance reports record Q4 profit
+      • Jio subscriber base crosses 500M
+
+    🤖 AI Analysis:
+    ...
     ━━━━━━━━━━━━━━━━━━━━━━
     """
     emoji = SIGNAL_EMOJI.get(rec.signal, "⚪")
@@ -152,6 +176,31 @@ def format_recommendation_card(
                 f"      {deal.buy_sell} {deal.quantity:,} @ ₹{deal.price:,.0f} "
                 f"(₹{deal.value_cr:.1f}Cr) — {deal.deal_date.strftime('%d %b')}"
             )
+
+    # News headlines section — show actual headlines
+    if news_articles:
+        # Separate corporate actions from regular news
+        corp_actions = [a for a in news_articles if _get_source(a) == "NSE Corporate Actions"]
+        regular_news = [a for a in news_articles if _get_source(a) != "NSE Corporate Actions"]
+
+        if regular_news:
+            lines.append("")
+            lines.append("📰 Recent News:")
+            for article in regular_news[:4]:
+                title = _get_title(article)
+                # Truncate long titles
+                if len(title) > 70:
+                    title = title[:67] + "..."
+                lines.append(f"  • {title}")
+
+        if corp_actions:
+            lines.append("")
+            lines.append("🏢 Corporate Actions:")
+            for ca in corp_actions[:3]:
+                title = _get_title(ca)
+                if len(title) > 70:
+                    title = title[:67] + "..."
+                lines.append(f"  • {title}")
 
     if rec.rationale:
         lines.append("")

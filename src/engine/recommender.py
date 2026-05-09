@@ -166,43 +166,52 @@ def _generate_template_rationale(
 
 RATIONALE_PROMPT = """You are a senior equity research analyst for Indian stock markets.
 
-Analyze {symbol} ({name}) and provide a structured summary based on these data points:
+Analyze {symbol} ({name}) and provide a detailed investment thesis.
 
 Signal: {signal} | Composite Score: {composite_score}/100
 
 FUNDAMENTALS (Score: {fund_score}/70):
-- P/E: {pe:.1f} (Industry: {ind_pe:.1f})
+- P/E: {pe:.1f} (Industry avg: {ind_pe:.1f}) — {pe_verdict}
 - ROE: {roe:.1f}%, D/E Ratio: {de:.2f}
 - EPS Growth: {eps_g:.1f}%, Revenue Growth: {rev_g:.1f}%
-- Promoter Holding: {promoter:.1f}%, FII Holding: {fii:.1f}%
+- Promoter Holding: {promoter:.1f}%, FII: {fii:.1f}%, DII: {dii:.1f}%
 - Market Cap: ₹{mcap:,.0f} Cr
 
 TECHNICALS (Score: {tech_score}/30):
 - CMP: ₹{cmp:,.2f}
-- Entry: ₹{entry:,.2f} | Target: ₹{target:,.2f} (+{upside:.0f}%)
-- Stop Loss: ₹{sl:,.2f} | Risk/Reward: {rr:.2f}
+- Entry: ₹{entry:,.2f} | Target 1: ₹{target:,.2f} (+{upside:.0f}%)
+- Stop Loss: ₹{sl:,.2f} | Risk/Reward: 1:{rr:.2f}
+- EMA50: ₹{ema50:,.2f} | EMA200: ₹{ema200:,.2f}
+- RSI: {rsi:.1f} | 6M Return: {ret_6m:.1f}%
 
 INSTITUTIONAL Score: {inst_score}/100
 {sentiment_line}
+{news_section}
+{corporate_actions_section}
 
-Respond in EXACTLY this format (3 bullets per section, each bullet under 60 characters):
+Provide your analysis in EXACTLY this format:
 
 FUNDAMENTAL:
-• <insight about valuation>
-• <insight about growth/profitability>
-• <insight about ownership/risk>
+• <specific valuation insight using P/E, ROE, D/E numbers>
+• <specific growth insight using EPS/revenue growth numbers>
+• <specific ownership insight mentioning promoter/FII/DII %>
 
 TECHNICAL:
-• <insight about price action/trend>
-• <insight about entry/targets>
-• <insight about risk/reward setup>
+• <specific price action insight referencing CMP vs EMAs>
+• <specific entry/target analysis with upside %>
+• <specific risk assessment using R:R ratio and stop loss>
 
 NEWS:
-• <insight about market sentiment>
-• <insight about sector/industry outlook>
-• <insight about catalyst or risk>
+• <key recent development or catalyst affecting {symbol}>
+• <sector or industry outlook relevant to {symbol}>
+• <upcoming risk or opportunity to monitor>
 
-Rules: No markdown. No headers other than the 3 section labels. Exactly 3 bullets per section. Be specific to {symbol}, not generic."""
+Rules:
+- Reference ACTUAL numbers from the data above, don't be vague
+- If news headlines are provided, reference specific developments
+- If corporate actions exist, mention their impact (dividend yield, bonus ratio, etc.)
+- Each bullet should be 40–80 characters, concise but data-specific
+- No markdown formatting. Only the 3 section headers and bullets."""
 
 
 # Suppress httpx INFO logs (logs every HTTP request, very noisy)
@@ -250,9 +259,15 @@ async def _generate_llm_rationale(
     inst_score: float,
     sent_score: Optional[float],
     cmp: float,
+    news_articles: list = None,
+    corporate_actions: list = None,
 ) -> Optional[str]:
     """
     Generate an LLM-enhanced rationale using Ollama.
+
+    Args:
+        news_articles: List of recent NewsArticle objects for context.
+        corporate_actions: List of corporate action dicts for context.
 
     Returns the rationale string, or None if Ollama is unavailable or fails.
     """
@@ -267,11 +282,40 @@ async def _generate_llm_rationale(
 
     m = fund_result.metrics
     t = tech_result.targets
+    tm = tech_result.metrics
 
     sentiment_line = ""
     if sent_score is not None:
         label = "positive" if sent_score > 50 else "negative" if sent_score < 30 else "neutral"
         sentiment_line = f"NEWS SENTIMENT: {label} (score: {sent_score:.0f}/100)"
+
+    # Build news section with actual headlines
+    news_section = ""
+    if news_articles:
+        news_lines = []
+        for article in news_articles[:8]:  # Top 8 articles
+            title = article.title if hasattr(article, 'title') else article.get('title', '')
+            source = article.source if hasattr(article, 'source') else article.get('source', '')
+            news_lines.append(f"  - [{source}] {title}")
+        if news_lines:
+            news_section = "RECENT NEWS HEADLINES:\n" + "\n".join(news_lines)
+    if not news_section:
+        news_section = "RECENT NEWS: No recent news found for this stock."
+
+    # Build corporate actions section
+    corporate_actions_section = ""
+    if corporate_actions:
+        ca_lines = []
+        for ca in corporate_actions[:5]:
+            title = ca.get('title', '') if isinstance(ca, dict) else str(ca)
+            ca_lines.append(f"  - {title}")
+        if ca_lines:
+            corporate_actions_section = "CORPORATE ACTIONS:\n" + "\n".join(ca_lines)
+    if not corporate_actions_section:
+        corporate_actions_section = "CORPORATE ACTIONS: None announced recently."
+
+    # P/E verdict
+    pe_verdict = "below industry" if m.pe < m.industry_pe else "above industry" if m.pe > m.industry_pe * 1.2 else "near industry average"
 
     upside = ((t.target_1 - t.entry) / t.entry * 100) if t.entry else 0
 
@@ -284,12 +328,14 @@ async def _generate_llm_rationale(
             fund_score=fund_result.score,
             pe=m.pe,
             ind_pe=m.industry_pe,
+            pe_verdict=pe_verdict,
             roe=m.roe_pct,
             de=m.de_ratio,
             eps_g=m.eps_growth,
             rev_g=m.rev_growth,
             promoter=m.promoter_pct,
             fii=m.fii_pct,
+            dii=getattr(m, 'dii_pct', 0),
             mcap=m.market_cap_cr,
             tech_score=tech_result.score,
             cmp=cmp,
@@ -298,8 +344,14 @@ async def _generate_llm_rationale(
             sl=t.stop_loss,
             rr=t.risk_reward,
             upside=upside,
+            ema50=tm.ema50,
+            ema200=tm.ema200,
+            rsi=tm.rsi,
+            ret_6m=tm.ret_6m,
             inst_score=inst_score,
             sentiment_line=sentiment_line,
+            news_section=news_section,
+            corporate_actions_section=corporate_actions_section,
         )
     except Exception as e:
         logger.warning(f"Failed to format LLM prompt for {symbol}: {e}")
@@ -322,12 +374,12 @@ async def _generate_llm_rationale(
         rationale = data.get("response", "").strip()
 
         # Sanity check — must be non-empty and not too long
-        if rationale and len(rationale) < 1200:
+        if rationale and len(rationale) < 1500:
             logger.info(f"✅ AI rationale for {symbol}: {rationale[:80]}...")
             return rationale
         elif rationale:
             logger.info(f"✅ AI rationale for {symbol} (truncated): {rationale[:80]}...")
-            return rationale[:1000] + "..."
+            return rationale[:1200] + "..."
         else:
             logger.warning(f"Ollama returned empty response for {symbol}")
 
@@ -501,6 +553,27 @@ async def analyze_single_stock(stock: Stock) -> Optional[Recommendation]:
         is_held=is_held,
     )
 
+    # ── Fetch fresh news for this specific stock ──
+    news_articles = []
+    corporate_actions = []
+    try:
+        from src.data.news_client import fetch_and_store_news
+        from src.analysis.sentiment import get_recent_news_for_stock
+        # Ensure latest news is in DB
+        await fetch_and_store_news()
+        news_articles = await get_recent_news_for_stock(stock.symbol, days=14)
+        # Separate corporate actions from regular news
+        corporate_actions = [
+            {"title": a.title, "source": a.source, "summary": a.summary}
+            for a in news_articles
+            if a.source == "NSE Corporate Actions"
+        ]
+        regular_news = [a for a in news_articles if a.source != "NSE Corporate Actions"]
+        logger.info(f"Found {len(regular_news)} news + {len(corporate_actions)} corporate actions for {stock.symbol}")
+    except Exception as e:
+        logger.warning(f"Failed to fetch fresh news for {stock.symbol}: {e}")
+        regular_news = news_articles
+
     # ── Rationale (always try LLM for single-stock analysis) ──
     rationale = _generate_template_rationale(
         composite.fundamental_score,
@@ -521,6 +594,8 @@ async def analyze_single_stock(stock: Stock) -> Optional[Recommendation]:
                 inst_score=inst_score,
                 sent_score=sent_score,
                 cmp=cmp,
+                news_articles=regular_news,
+                corporate_actions=corporate_actions,
             )
             if llm_rationale:
                 rationale = llm_rationale

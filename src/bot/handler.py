@@ -663,9 +663,18 @@ async def _handle_analyze_callback(query, stock_id: int) -> None:
     except Exception as e:
         logger.warning(f"Could not fetch deals for {stock.symbol}: {e}")
 
+    # Fetch recent news for the card
+    news_articles = []
+    try:
+        from src.analysis.sentiment import get_recent_news_for_stock
+        news_articles = await get_recent_news_for_stock(stock.symbol, days=14)
+    except Exception as e:
+        logger.warning(f"Could not fetch news for {stock.symbol}: {e}")
+
     card = format_recommendation_card(
         rec, stock.symbol, stock.name,
         institutional_deals=institutional_deals,
+        news_articles=news_articles,
     )
     await query.message.reply_text(card)
 
@@ -713,9 +722,18 @@ async def _run_single_analysis(
     except Exception as e:
         logger.warning(f"Could not fetch deals for {stock.symbol}: {e}")
 
+    # Fetch recent news for the card
+    news_articles = []
+    try:
+        from src.analysis.sentiment import get_recent_news_for_stock
+        news_articles = await get_recent_news_for_stock(stock.symbol, days=14)
+    except Exception as e:
+        logger.warning(f"Could not fetch news for {stock.symbol}: {e}")
+
     card = format_recommendation_card(
         rec, stock.symbol, stock.name,
         institutional_deals=institutional_deals,
+        news_articles=news_articles,
     )
     await update.message.reply_text(card)
 
