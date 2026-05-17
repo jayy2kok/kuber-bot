@@ -84,89 +84,55 @@ async def _get_held_symbols() -> set[str]:
 
 
 def _generate_template_rationale(
-    fund_score: float,
-    tech_score: float,
-    inst_score: float,
-    sent_score: Optional[float],
+    fund_result=None,
+    tech_result=None,
+    inst_score: float = 50,
+    cmp: float = 0,
 ) -> str:
-    """Generate a structured template-based rationale (fallback)."""
+    """
+    Generate a data-driven template rationale (fallback when Ollama is unavailable).
 
-    # Fundamental bullets
+    Uses actual fundamental/technical metrics to produce stock-specific bullets
+    instead of generic score-based text.
+    """
+
+    # ── Fundamental bullets ──
     fund_lines = []
-    if fund_score > 70:
-        fund_lines.append("• Strong fundamentals with healthy valuations")
-    elif fund_score > 50:
-        fund_lines.append("• Reasonable valuation with steady metrics")
-    elif fund_score > 30:
-        fund_lines.append("• Average valuation, needs improvement")
+    if fund_result and hasattr(fund_result, 'metrics'):
+        m = fund_result.metrics
+        pe_vs = "below" if m.pe < m.industry_pe else "above" if m.pe > m.industry_pe * 1.2 else "near"
+        fund_lines.append(f"• P/E {m.pe:.1f} ({pe_vs} industry avg {m.industry_pe:.1f})")
+        fund_lines.append(f"• ROE {m.roe_pct:.1f}%, D/E {m.de_ratio:.2f}")
+        fund_lines.append(f"• EPS growth {m.eps_growth:+.1f}%, Revenue growth {m.rev_growth:+.1f}%")
+        fund_lines.append(f"• Promoter {m.promoter_pct:.0f}%, FII {m.fii_pct:.0f}%")
     else:
-        fund_lines.append("• Weak valuation profile, high risk")
+        fund_lines.append("• Fundamental data not available")
 
-    if fund_score > 60:
-        fund_lines.append("• Good profitability and growth trajectory")
-    elif fund_score > 40:
-        fund_lines.append("• Moderate growth, mixed profitability")
-    else:
-        fund_lines.append("• Low growth, profitability concerns")
-
-    if inst_score > 60:
-        fund_lines.append("• High institutional & promoter confidence")
-    elif inst_score > 40:
-        fund_lines.append("• Moderate promoter & institutional holding")
-    else:
-        fund_lines.append("• Low institutional interest, ownership risk")
-
-    # Technical bullets
+    # ── Technical bullets ──
     tech_lines = []
-    if tech_score > 70:
-        tech_lines.append("• Strong bullish momentum on charts")
-    elif tech_score > 50:
-        tech_lines.append("• Positive price trend forming")
-    elif tech_score > 30:
-        tech_lines.append("• Neutral trend, awaiting breakout")
-    else:
-        tech_lines.append("• Bearish technical setup, caution advised")
+    if tech_result and hasattr(tech_result, 'targets') and hasattr(tech_result, 'metrics'):
+        t = tech_result.targets
+        tm = tech_result.metrics
+        upside = ((t.target_1 - t.entry) / t.entry * 100) if t.entry > 0 else 0
+        downside = ((t.stop_loss - t.entry) / t.entry * 100) if t.entry > 0 else 0
 
-    if tech_score > 60:
-        tech_lines.append("• Entry near key support levels")
-        tech_lines.append("• Favorable risk/reward ratio")
-    elif tech_score > 40:
-        tech_lines.append("• Entry at consolidation zone")
-        tech_lines.append("• Moderate risk/reward positioning")
+        trend = "above" if cmp > tm.ema200 else "below"
+        tech_lines.append(f"• CMP ₹{cmp:,.2f} — {trend} EMA200 (₹{tm.ema200:,.0f})")
+        tech_lines.append(f"• RSI: {tm.rsi:.0f} | 6M Return: {tm.ret_6m:+.1f}%")
+        tech_lines.append(f"• Entry ₹{t.entry:,.0f} → Target ₹{t.target_1:,.0f} ({upside:+.0f}%)")
+        tech_lines.append(f"• Stop Loss ₹{t.stop_loss:,.0f} ({downside:+.0f}%) | R:R 1:{t.risk_reward:.2f}")
     else:
-        tech_lines.append("• Price below key resistance levels")
-        tech_lines.append("• Unfavorable risk/reward setup")
-
-    # News/sentiment bullets
-    news_lines = []
-    if sent_score is not None:
-        if sent_score > 60:
-            news_lines.append("• Positive sentiment in recent news")
-            news_lines.append("• Favorable media coverage")
-            news_lines.append("• Market optimism supports outlook")
-        elif sent_score > 40:
-            news_lines.append("• Neutral sentiment in news flow")
-            news_lines.append("• No major positive/negative triggers")
-            news_lines.append("• Sector performance inline with market")
-        else:
-            news_lines.append("• Negative sentiment in recent news")
-            news_lines.append("• Adverse media coverage noted")
-            news_lines.append("• Headwinds may weigh on performance")
-    else:
-        news_lines.append("• No recent news data available")
-        news_lines.append("• Sentiment analysis pending")
-        news_lines.append("• Monitor for upcoming catalysts")
+        tech_lines.append("• Technical data not available")
 
     return (
-        f"FUNDAMENTAL:\n" + "\n".join(fund_lines) + "\n\n"
-        f"TECHNICAL:\n" + "\n".join(tech_lines) + "\n\n"
-        f"NEWS:\n" + "\n".join(news_lines)
+        "FUNDAMENTAL:\n" + "\n".join(fund_lines) + "\n\n"
+        "TECHNICAL:\n" + "\n".join(tech_lines)
     )
 
 
 RATIONALE_PROMPT = """You are a senior equity research analyst for Indian stock markets.
 
-Analyze {symbol} ({name}) and provide a detailed investment thesis.
+Analyze {symbol} ({name}) and provide a concise investment thesis.
 
 Signal: {signal} | Composite Score: {composite_score}/100
 
@@ -185,7 +151,6 @@ TECHNICALS (Score: {tech_score}/30):
 - RSI: {rsi:.1f} | 6M Return: {ret_6m:.1f}%
 
 INSTITUTIONAL Score: {inst_score}/100
-{sentiment_line}
 {news_section}
 {corporate_actions_section}
 
@@ -201,17 +166,13 @@ TECHNICAL:
 • <specific entry/target analysis with upside %>
 • <specific risk assessment using R:R ratio and stop loss>
 
-NEWS:
-• <key recent development or catalyst affecting {symbol}>
-• <sector or industry outlook relevant to {symbol}>
-• <upcoming risk or opportunity to monitor>
-
 Rules:
 - Reference ACTUAL numbers from the data above, don't be vague
 - If news headlines are provided, reference specific developments
 - If corporate actions exist, mention their impact (dividend yield, bonus ratio, etc.)
 - Each bullet should be 40–80 characters, concise but data-specific
-- No markdown formatting. Only the 3 section headers and bullets."""
+- No markdown formatting. Only the 2 section headers and bullets.
+- Do NOT include a NEWS section — news is shown separately."""
 
 
 # Suppress httpx INFO logs (logs every HTTP request, very noisy)
@@ -284,11 +245,6 @@ async def _generate_llm_rationale(
     t = tech_result.targets
     tm = tech_result.metrics
 
-    sentiment_line = ""
-    if sent_score is not None:
-        label = "positive" if sent_score > 50 else "negative" if sent_score < 30 else "neutral"
-        sentiment_line = f"NEWS SENTIMENT: {label} (score: {sent_score:.0f}/100)"
-
     # Build news section with actual headlines
     news_section = ""
     if news_articles:
@@ -326,10 +282,10 @@ async def _generate_llm_rationale(
             signal=signal.value.upper().replace("_", " "),
             composite_score=composite_score,
             fund_score=fund_result.score,
-            pe=m.pe,
-            ind_pe=m.industry_pe,
+            pe=m.pe or 0,
+            ind_pe=m.industry_pe or 0,
             pe_verdict=pe_verdict,
-            roe=m.roe_pct,
+            roe=m.roe_pct or 0,
             de=m.de_ratio,
             eps_g=m.eps_growth,
             rev_g=m.rev_growth,
@@ -349,7 +305,6 @@ async def _generate_llm_rationale(
             rsi=tm.rsi,
             ret_6m=tm.ret_6m,
             inst_score=inst_score,
-            sentiment_line=sentiment_line,
             news_section=news_section,
             corporate_actions_section=corporate_actions_section,
         )
@@ -576,10 +531,10 @@ async def analyze_single_stock(stock: Stock) -> Optional[Recommendation]:
 
     # ── Rationale (always try LLM for single-stock analysis) ──
     rationale = _generate_template_rationale(
-        composite.fundamental_score,
-        composite.technical_score,
-        composite.institutional_score,
-        composite.sentiment_score,
+        fund_result=fund_result,
+        tech_result=tech_result,
+        inst_score=inst_score,
+        cmp=cmp,
     )
 
     if fund_result and tech_result:
@@ -810,12 +765,12 @@ async def run_full_scan() -> list[Recommendation]:
 
         tech = cand["tech_result"]
 
-        # Use fast template rationale for all candidates
+        # Use data-driven template rationale for all candidates
         rationale = _generate_template_rationale(
-            comp.fundamental_score,
-            comp.technical_score,
-            comp.institutional_score,
-            comp.sentiment_score,
+            fund_result=cand["fund_result"],
+            tech_result=cand["tech_result"],
+            inst_score=cand["inst_score"],
+            cmp=cand["cmp"],
         )
 
         rec = Recommendation(
@@ -871,9 +826,26 @@ async def run_full_scan() -> list[Recommendation]:
             try:
                 cand = rec._cand_data  # type: ignore[attr-defined]
                 comp = cand["composite"]
+                stock = cand["stock"]
+
+                # Fetch recent news for this stock
+                news_articles = []
+                corporate_actions = []
+                try:
+                    from src.analysis.sentiment import get_recent_news_for_stock
+                    all_news = await get_recent_news_for_stock(stock.symbol, days=14)
+                    corporate_actions = [
+                        {"title": a.title, "source": a.source, "summary": a.summary}
+                        for a in all_news
+                        if a.source == "NSE Corporate Actions"
+                    ]
+                    news_articles = [a for a in all_news if a.source != "NSE Corporate Actions"]
+                except Exception as e:
+                    logger.debug(f"News fetch for LLM failed for {stock.symbol}: {e}")
+
                 llm_rationale = await _generate_llm_rationale(
-                    symbol=cand["stock"].symbol,
-                    name=cand["stock"].name,
+                    symbol=stock.symbol,
+                    name=stock.name,
                     signal=comp.signal,
                     composite_score=comp.final_score,
                     fund_result=cand["fund_result"],
@@ -881,6 +853,8 @@ async def run_full_scan() -> list[Recommendation]:
                     inst_score=cand["inst_score"],
                     sent_score=cand.get("sentiment_score"),
                     cmp=cand["cmp"],
+                    news_articles=news_articles,
+                    corporate_actions=corporate_actions,
                 )
                 if llm_rationale:
                     rec.rationale = llm_rationale

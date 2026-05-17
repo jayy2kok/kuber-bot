@@ -768,9 +768,19 @@ async def _send_recommendation(bot, rec: Recommendation) -> None:
     except Exception as e:
         logger.warning(f"Could not fetch institutional deals for {stock.symbol}: {e}")
 
+
+    # Fetch recent news articles for this stock
+    news_articles = []
+    try:
+        from src.analysis.sentiment import get_recent_news_for_stock
+        news_articles = await get_recent_news_for_stock(stock.symbol, days=14)
+    except Exception as e:
+        logger.warning(f"Could not fetch news for {stock.symbol}: {e}")
+
     card = format_recommendation_card(
         rec, stock.symbol, stock.name,
         institutional_deals=institutional_deals,
+        news_articles=news_articles,
     )
     keyboard = build_approval_keyboard(rec.id)
 

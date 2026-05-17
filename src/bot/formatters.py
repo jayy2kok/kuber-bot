@@ -78,6 +78,15 @@ def _get_source(article) -> str:
     return ""
 
 
+def _get_url(article) -> str:
+    """Extract URL from an article (ORM object or dict)."""
+    if hasattr(article, 'url'):
+        return article.url or ""
+    if isinstance(article, dict):
+        return article.get('url', '')
+    return ""
+
+
 def format_recommendation_card(
     rec: Recommendation, stock_symbol: str, stock_name: str,
     institutional_deals: list | None = None,
@@ -188,19 +197,30 @@ def format_recommendation_card(
             lines.append("📰 Recent News:")
             for article in regular_news[:4]:
                 title = _get_title(article)
+                url = _get_url(article)
+                source = _get_source(article)
                 # Truncate long titles
-                if len(title) > 70:
-                    title = title[:67] + "..."
-                lines.append(f"  • {title}")
+                if len(title) > 60:
+                    title = title[:57] + "..."
+                if url:
+                    lines.append(f"  • {title}")
+                    lines.append(f"    🔗 {url}")
+                else:
+                    lines.append(f"  • {title}")
 
         if corp_actions:
             lines.append("")
             lines.append("🏢 Corporate Actions:")
             for ca in corp_actions[:3]:
                 title = _get_title(ca)
-                if len(title) > 70:
-                    title = title[:67] + "..."
-                lines.append(f"  • {title}")
+                url = _get_url(ca)
+                if len(title) > 60:
+                    title = title[:57] + "..."
+                if url:
+                    lines.append(f"  • {title}")
+                    lines.append(f"    🔗 {url}")
+                else:
+                    lines.append(f"  • {title}")
 
     if rec.rationale:
         lines.append("")
@@ -231,7 +251,6 @@ def _format_structured_rationale(rationale: str) -> list[str]:
     section_map = {
         "FUNDAMENTAL": "📊 Fundamental:",
         "TECHNICAL": "📈 Technical:",
-        "NEWS": "📰 News:",
     }
 
     lines_out: list[str] = []
