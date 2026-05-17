@@ -178,9 +178,20 @@ async def job_daily_digest():
     Reads deliverable recommendations from today's scan and sends them
     using the Telegram bot.
 
+    Skipped on trading holidays (weekends + NSE holidays).
+
     If Kite is configured but not authenticated, sends a login link
     and queues the digest to auto-deliver after login.
     """
+    from datetime import date as _date
+    from src.data.nse_holidays import is_trading_day
+
+    today = _date.today()
+
+    if not is_trading_day(today):
+        logger.info(f"📅 Today ({today}) is a trading holiday — digest skipped")
+        return
+
     logger.info("📊 Preparing daily digest...")
 
     if not settings.has_telegram:

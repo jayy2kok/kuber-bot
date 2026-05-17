@@ -12,7 +12,7 @@ Provides:
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, date, timezone, timedelta
 from typing import Optional
 from urllib.parse import urlencode
 
@@ -30,8 +30,21 @@ settings = get_settings()
 # Lazy-loaded Kite instance
 _kite = None
 
+# Track when the access token was generated (IST date).
+# Kite tokens expire daily around 6:00 AM IST, so we treat any
+# token from a previous calendar day as expired.
+_auth_date: Optional[date] = None
+
 
 # ─── P5.1 Authentication ─────────────────────────────────────────────────────
+
+# IST offset for date comparison
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _today_ist() -> date:
+    """Get today's date in IST."""
+    return datetime.now(_IST).date()
 
 
 def get_login_url() -> str:
@@ -53,6 +66,8 @@ async def generate_session(request_token: str) -> dict:
     This must be called once per trading day after browser login.
     Returns the session dict with access_token, user info, etc.
     """
+    global _auth_date
+
     kite = _get_kite_instance()
     try:
         session_data = await asyncio.to_thread(
@@ -62,7 +77,11 @@ async def generate_session(request_token: str) -> dict:
         )
         access_token = session_data["access_token"]
         kite.set_access_token(access_token)
-        logger.info(f"Kite session established for {session_data.get('user_name', 'user')}")
+        _auth_date = _today_ist()
+        logger.info(
+            f"Kite session established for {session_data.get('user_name', 'user')} "
+            f"(auth_date={_auth_date})"
+        )
         return session_data
     except Exception as e:
         logger.error(f"Kite session generation failed: {e}")
@@ -85,13 +104,77 @@ def _get_kite_instance():
     return _kite
 
 
-def is_authenticated() -> bool:
-    """Check if Kite has a valid access token set."""
+def _invalidate_session() -> None:
+    """Clear the stale access token so a fresh login is required."""
+    global _auth_date
     try:
         kite = _get_kite_instance()
-        return kite.access_token is not None and kite.access_token != ""
+        kite.set_access_token(None)
+    except Exception:
+        pass
+    _auth_date = None
+    logger.info("Kite session invalidated — fresh login required")
+
+
+def is_authenticated() -> bool:
+    """
+    Check if Kite has a valid (non-expired) access token.
+
+    Kite access tokens expire daily around 6:00 AM IST.
+    We consider a token valid only if:
+      1. An access token is set on the KiteConnect instance, AND
+      2. The token was generated today (IST calendar day).
+
+    If the token is from a previous day, it is automatically cleared
+    so that /login will present the login screen again.
+    """
+    try:
+        kite = _get_kite_instance()
+        has_token = kite.access_token is not None and kite.access_token != ""
     except Exception:
         return False
+
+    if not has_token:
+        return False
+
+    # If we don't know when the token was generated (e.g. loaded from
+    # env var on first container start), validate with a lightweight API call.
+    if _auth_date is None:
+        return _validate_token_live()
+
+    # Token from a previous day → expired
+    if _auth_date < _today_ist():
+        logger.info(
+            f"Kite token from {_auth_date} is stale (today={_today_ist()}) — invalidating"
+        )
+        _invalidate_session()
+        return False
+
+    return True
+
+
+def _validate_token_live() -> bool:
+    """
+    Validate the current token with a lightweight Kite API call.
+
+    Used as a one-time check when _auth_date is unknown (e.g. token
+    was loaded from the KITE_ACCESS_TOKEN env var at startup).
+    """
+    global _auth_date
+
+    try:
+        kite = _get_kite_instance()
+        # kite.profile() is the lightest authenticated call
+        profile = kite.profile()
+        if profile:
+            _auth_date = _today_ist()
+            logger.info(f"Kite token validated via API (user={profile.get('user_name', '?')})")
+            return True
+    except Exception as e:
+        logger.info(f"Kite token validation failed: {e} — clearing stale token")
+        _invalidate_session()
+
+    return False
 
 
 # ─── Live Price Fetching ─────────────────────────────────────────────────────
