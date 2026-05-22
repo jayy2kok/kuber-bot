@@ -317,6 +317,8 @@ class Holding(Base):
     pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     pnl_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     is_paper: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Origin of this holding — e.g. "zerodha", "paper"
+    source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="zerodha")
 
     synced_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

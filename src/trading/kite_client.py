@@ -16,7 +16,7 @@ from datetime import datetime, date, timezone, timedelta
 from typing import Optional
 from urllib.parse import urlencode
 
-from sqlalchemy import select, and_
+from sqlalchemy import select
 
 from src.config import get_settings
 from src.db.engine import get_session
@@ -457,6 +457,10 @@ async def sync_holdings_from_kite() -> int:
     """
     Sync holdings from Zerodha Kite to the DB.
 
+    Strategy: delete all existing non-paper holdings, then bulk-insert
+    the current Zerodha snapshot.  This guarantees the DB always mirrors
+    Zerodha exactly — sold stocks are removed automatically.
+
     Works in BOTH paper and live modes — holdings from your real Zerodha
     account are always needed for accurate sell signal generation.
 
@@ -481,54 +485,43 @@ async def sync_holdings_from_kite() -> int:
         logger.error(f"Failed to fetch Kite holdings: {e}")
         return 0
 
-    synced = 0
+    now = datetime.utcnow()
+
     async with get_session() as session:
+        # ── Step 1: wipe all existing non-paper holdings ──────────────────
+        from sqlalchemy import delete as sa_delete
+        await session.execute(
+            sa_delete(Holding).where(Holding.is_paper == False)
+        )
+
+        # ── Step 2: insert the fresh Zerodha snapshot ─────────────────────
+        synced = 0
         for h in holdings:
             symbol = h.get("tradingsymbol", "")
             if not symbol:
                 continue
 
-            # Check if holding exists
-            result = await session.execute(
-                select(Holding).where(
-                    and_(
-                        Holding.symbol == symbol,
-                        Holding.is_paper == False,
-                    )
-                )
-            )
-            existing = result.scalar_one_or_none()
-
-            qty = h.get("quantity", 0)
             avg_price = h.get("average_price", 0)
             last_price = h.get("last_price", avg_price)
             pnl = h.get("pnl", 0)
             pnl_pct = ((last_price - avg_price) / avg_price * 100) if avg_price > 0 else 0
 
-            if existing:
-                existing.quantity = qty
-                existing.average_price = avg_price
-                existing.last_price = last_price
-                existing.pnl = pnl
-                existing.pnl_pct = round(pnl_pct, 2)
-                existing.synced_at = datetime.utcnow()
-            else:
-                new_holding = Holding(
-                    symbol=symbol,
-                    quantity=qty,
-                    average_price=avg_price,
-                    last_price=last_price,
-                    pnl=pnl,
-                    pnl_pct=round(pnl_pct, 2),
-                    is_paper=False,
-                    synced_at=datetime.utcnow(),
-                )
-                session.add(new_holding)
-
+            session.add(Holding(
+                symbol=symbol,
+                quantity=h.get("quantity", 0),
+                average_price=avg_price,
+                last_price=last_price,
+                pnl=pnl,
+                pnl_pct=round(pnl_pct, 2),
+                is_paper=False,
+                source="zerodha",
+                synced_at=now,
+            ))
             synced += 1
 
-    logger.info(f"Synced {synced} holdings from Zerodha")
+    logger.info(f"Synced {synced} holdings from Zerodha (replaced entire portfolio)")
     return synced
+
 
 
 async def get_portfolio_value() -> dict:
