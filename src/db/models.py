@@ -264,6 +264,13 @@ class Recommendation(Base):
     delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Watchlist tracking
+    is_accepted: Mapped[bool] = mapped_column(Boolean, default=False)
+    # "active" | "target_1_hit" | "target_2_hit" | "sl_hit"
+    watchlist_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    status_hit_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    cmp_last_refresh: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     stock: Mapped["Stock"] = relationship(back_populates="recommendations")

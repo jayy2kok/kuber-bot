@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KuberBot — Recommendation Watchlist</title>
+  <meta name="description" content="Track FBot stock recommendation performance over time" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/watchlist.css" />
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-icon">📈</span>
+        <span class="brand-name">KuberBot</span>
+        <span class="brand-sub">Watchlist</span>
+      </div>
+      <div class="header-meta">
+        <span class="refresh-label" id="refreshLabel">Last refresh: —</span>
+        <button class="btn-refresh" id="btnRefresh" title="Refresh CMP now">
+          <span class="refresh-icon">⟳</span> Refresh CMP
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- Summary Cards -->
+    <section class="cards" id="summaryCards">
+      <div class="card">
+        <div class="card-label">Total Recommendations</div>
+        <div class="card-value" id="cTotal">—</div>
+      </div>
+      <div class="card card-green">
+        <div class="card-label">Accepted ✅</div>
+        <div class="card-value" id="cAccepted">—</div>
+        <div class="card-sub" id="cAcceptedPnl">—</div>
+      </div>
+      <div class="card card-amber">
+        <div class="card-label">Not Accepted ⏳</div>
+        <div class="card-value" id="cNotAccepted">—</div>
+        <div class="card-sub" id="cNotAcceptedPnl">—</div>
+      </div>
+      <div class="card card-accent">
+        <div class="card-label">Overall P&amp;L (Accepted)</div>
+        <div class="card-value" id="cOverallPnl">—</div>
+        <div class="card-sub" id="cAvgPct">—</div>
+      </div>
+      <div class="card card-missed">
+        <div class="card-label">Missed Gains</div>
+        <div class="card-value" id="cMissed">—</div>
+        <div class="card-sub">from not-accepted</div>
+      </div>
+    </section>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" id="tabAccepted" data-tab="accepted">
+        ✅ Recommendations Accepted
+        <span class="tab-badge" id="badgeAccepted">0</span>
+      </button>
+      <button class="tab" id="tabNotAccepted" data-tab="not_accepted">
+        ⏳ Recommendations Not Accepted
+        <span class="tab-badge" id="badgeNotAccepted">0</span>
+      </button>
+    </div>
+
+    <!-- Missed banner (shown on not-accepted tab only) -->
+    <div class="missed-banner hidden" id="missedBanner">
+      💡 You missed <strong id="missedAmt">₹0</strong> in potential gains from stocks that hit their targets
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap">
+      <table class="rec-table" id="recTable">
+        <thead id="tableHead"></thead>
+        <tbody id="tableBody">
+          <tr><td colspan="14" class="loading">Loading recommendations…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="empty hidden" id="emptyState">No recommendations found.</div>
+  </main>
+
+  <script src="/static/watchlist.js"></script>
+</body>
+</html>

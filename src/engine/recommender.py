@@ -703,6 +703,15 @@ async def run_full_scan() -> list[Recommendation]:
                 if not is_held:
                     continue
 
+            # ── Skip BUY for stocks already in the portfolio ──────────────
+            # SELL signals for held stocks are still generated (handled below)
+            if is_held and composite.signal in (SignalType.STRONG_BUY, SignalType.BUY):
+                logger.debug(
+                    f"Skipping BUY for held stock: {stock.symbol} "
+                    f"(signal={composite.signal.value}, score={composite.pre_score:.0f})"
+                )
+                continue
+
             candidates.append({
                 "stock": stock,
                 "fund_result": fund_result,

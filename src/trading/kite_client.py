@@ -520,6 +520,15 @@ async def sync_holdings_from_kite() -> int:
             synced += 1
 
     logger.info(f"Synced {synced} holdings from Zerodha (replaced entire portfolio)")
+
+    # ── Sync watchlist acceptance status ─────────────────────────────────────
+    # Cross-reference delivered BUY recs with the fresh holdings snapshot.
+    try:
+        from src.engine.watchlist import sync_accepted_status
+        await sync_accepted_status()
+    except Exception as e:
+        logger.warning(f"Watchlist acceptance sync failed: {e}")
+
     return synced
 
 

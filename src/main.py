@@ -10,11 +10,13 @@ Starts the FastAPI server with:
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 import structlog
 import uvicorn
 from fastapi import FastAPI, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
 from src.config import get_settings
@@ -150,6 +152,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Serve static assets (watchlist CSS/JS)
+_static_dir = Path(__file__).parent / "static"
+_static_dir.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
 
 @app.get("/health")
 async def health_check():
@@ -171,6 +178,42 @@ async def root():
         "version": "0.1.0",
         "docs": "/docs",
     }
+
+
+# ─── Watchlist Dashboard ──────────────────────────────────────────────────────
+
+
+@app.get("/watchlist", response_class=HTMLResponse)
+async def watchlist_page():
+    """Serve the recommendation watchlist dashboard."""
+    static_dir = Path(__file__).parent / "static"
+    html_file = static_dir / "watchlist.html"
+    if html_file.exists():
+        return HTMLResponse(content=html_file.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Watchlist dashboard not found</h1>", status_code=404)
+
+
+@app.get("/api/watchlist")
+async def api_watchlist():
+    """JSON API: all delivered recommendations with current performance data."""
+    from src.engine.watchlist import get_watchlist_data
+    return await get_watchlist_data()
+
+
+@app.get("/api/watchlist/summary")
+async def api_watchlist_summary():
+    """JSON API: aggregate P&L summary for the watchlist summary cards."""
+    from src.engine.watchlist import get_watchlist_summary
+    return await get_watchlist_summary()
+
+
+@app.post("/api/watchlist/refresh")
+async def api_watchlist_refresh():
+    """Trigger a manual CMP refresh for all watchlist recommendations."""
+    from src.engine.watchlist import refresh_watchlist_cmp, sync_accepted_status
+    updated = await refresh_watchlist_cmp()
+    accepted = await sync_accepted_status()
+    return {"refreshed": updated, "newly_accepted": accepted}
 
 
 # ─── Kite Connect OAuth Endpoints ────────────────────────────────────────────

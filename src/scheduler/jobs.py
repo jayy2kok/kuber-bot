@@ -12,7 +12,7 @@ Schedule:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from src.config import get_settings
 from src.data.yahoo_client import fetch_and_store_stock_data
@@ -253,6 +253,39 @@ async def job_portfolio_sync():
         logger.warning(f"Portfolio sync failed: {e}")
 
 
+async def job_refresh_watchlist_cmp():
+    """
+    Hourly during market hours — refresh CMP for watchlist recommendations.
+
+    Runs 9:15 AM – 3:30 PM IST, Mon–Fri.
+    Skips weekends and NSE trading holidays.
+    Evaluates target / stop-loss milestones on each run.
+    """
+    from datetime import date as _date, time as _time
+    from src.data.nse_holidays import is_trading_day
+
+    today = _date.today()
+    if not is_trading_day(today):
+        logger.debug("Watchlist CMP refresh skipped — trading holiday")
+        return
+
+    # Only run during market hours (IST)
+    _IST = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(tz=_IST)
+    market_open = _time(9, 15)
+    market_close = _time(15, 30)
+    if not (market_open <= now_ist.time() <= market_close):
+        logger.debug("Watchlist CMP refresh skipped — outside market hours")
+        return
+
+    try:
+        from src.engine.watchlist import refresh_watchlist_cmp
+        updated = await refresh_watchlist_cmp()
+        logger.info(f"📈 Watchlist CMP refreshed for {updated} recommendations")
+    except Exception as e:
+        logger.warning(f"Watchlist CMP refresh failed: {e}")
+
+
 def register_jobs(scheduler):
     """
     Register all scheduled jobs with APScheduler.
@@ -332,10 +365,23 @@ def register_jobs(scheduler):
         replace_existing=True,
     )
 
+    # Watchlist CMP refresh — every hour during market hours
+    scheduler.add_job(
+        job_refresh_watchlist_cmp,
+        "cron",
+        hour="9-15",
+        minute=15,
+        day_of_week="mon-fri",
+        timezone="Asia/Kolkata",
+        id="watchlist_cmp_refresh",
+        name="Watchlist CMP Refresh",
+        replace_existing=True,
+    )
+
     logger.info(
         f"Registered {len(scheduler.get_jobs())} scheduled jobs "
         f"(scan={settings.full_scan_hour}:00, "
         f"digest={settings.digest_hour}:00, "
         f"deals={settings.bulk_deal_hour}:00, "
-        f"cleanup=00:00)"
+        f"cleanup=00:00, watchlist_cmp=9-15:15)"
     )
