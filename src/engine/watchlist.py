@@ -93,6 +93,10 @@ async def refresh_watchlist_cmp() -> int:
     Batch-refresh CMP for all delivered recommendations and evaluate
     target/stop-loss milestones.
 
+    Price sources (in order):
+      1. Zerodha Kite LTP (if authenticated)
+      2. Yahoo Finance regularMarketPrice (fallback)
+
     Status transitions (irreversible once hit):
       - CMP >= target_2           → "target_2_hit"
       - CMP >= target_1 (& < t2) → "target_1_hit"
@@ -101,12 +105,6 @@ async def refresh_watchlist_cmp() -> int:
 
     Returns the number of recommendations updated.
     """
-    from src.trading.kite_client import fetch_ltp_batch, is_authenticated
-
-    if not is_authenticated():
-        logger.info("Watchlist CMP refresh skipped — Kite not authenticated")
-        return 0
-
     async with get_session() as session:
         # Fetch all delivered recs that haven't hit a final milestone yet
         result = await session.execute(
@@ -131,10 +129,31 @@ async def refresh_watchlist_cmp() -> int:
         id_to_symbol = {s.id: s.symbol for s in stocks_result.scalars().all()}
 
     symbols = list(id_to_symbol.values())
-    prices = await fetch_ltp_batch(symbols)
+
+    # ── Source 1: Zerodha Kite LTP (primary) ──
+    prices: dict[str, float] = {}
+    try:
+        from src.trading.kite_client import fetch_ltp_batch, is_authenticated
+        if is_authenticated():
+            prices = await fetch_ltp_batch(symbols)
+            logger.info(f"Kite LTP: got prices for {len(prices)}/{len(symbols)} symbols")
+        else:
+            logger.info("Kite not authenticated — will use Yahoo Finance fallback")
+    except Exception as e:
+        logger.warning(f"Kite LTP batch failed: {e}")
+
+    # ── Source 2: Yahoo Finance fallback for missing symbols ──
+    missing_symbols = [s for s in symbols if s not in prices]
+    if missing_symbols:
+        yahoo_prices = await _fetch_yahoo_ltp_batch(missing_symbols)
+        prices.update(yahoo_prices)
+        logger.info(
+            f"Yahoo fallback: got prices for {len(yahoo_prices)}/{len(missing_symbols)} "
+            f"missing symbols"
+        )
 
     if not prices:
-        logger.warning("Watchlist CMP refresh: no prices returned from Kite")
+        logger.warning("Watchlist CMP refresh: no prices from Kite or Yahoo")
         return 0
 
     now = datetime.utcnow()
@@ -147,6 +166,10 @@ async def refresh_watchlist_cmp() -> int:
                 continue
 
             cmp = prices[symbol]
+
+            # Skip NaN/Inf prices
+            if math.isnan(cmp) or math.isinf(cmp):
+                continue
 
             # Re-fetch rec in this session for update
             db_rec = await session.get(Recommendation, rec.id)
@@ -177,6 +200,44 @@ async def refresh_watchlist_cmp() -> int:
 
     logger.info(f"Watchlist CMP refresh: updated {updated} recommendations")
     return updated
+
+
+async def _fetch_yahoo_ltp_batch(symbols: list[str]) -> dict[str, float]:
+    """
+    Fetch last traded prices from Yahoo Finance as fallback.
+
+    Uses yfinance's Ticker.info['regularMarketPrice'] for each symbol.
+    """
+    import asyncio
+
+    try:
+        import yfinance as yf
+    except ImportError:
+        logger.warning("yfinance not installed — Yahoo fallback unavailable")
+        return {}
+
+    prices: dict[str, float] = {}
+
+    async def _fetch_one(sym: str):
+        try:
+            ticker = yf.Ticker(f"{sym}.NS")
+            info = await asyncio.to_thread(lambda: ticker.info)
+            price = info.get("regularMarketPrice") or info.get("currentPrice")
+            if price is not None and not math.isnan(float(price)):
+                prices[sym] = float(price)
+        except Exception as e:
+            logger.debug(f"Yahoo LTP failed for {sym}: {e}")
+
+    # Fetch in parallel with a concurrency limit to avoid rate limiting
+    semaphore = asyncio.Semaphore(5)
+
+    async def _limited_fetch(sym: str):
+        async with semaphore:
+            await _fetch_one(sym)
+            await asyncio.sleep(0.1)  # Small delay to avoid rate limiting
+
+    await asyncio.gather(*[_limited_fetch(s) for s in symbols])
+    return prices
 
 
 # ─── Data Retrieval ───────────────────────────────────────────────────────────
@@ -278,6 +339,10 @@ async def get_watchlist_data() -> dict:
                 d[k] = 0.0
         return d
 
+    # Track seen stock_ids to deduplicate — only show the latest rec per stock
+    seen_accepted = set()
+    seen_not_accepted = set()
+
     for rec in recs:
         stock = stocks_by_id.get(rec.stock_id)
         if not stock:
@@ -307,10 +372,16 @@ async def get_watchlist_data() -> dict:
         }
 
         if rec.is_accepted:
+            if rec.stock_id in seen_accepted:
+                continue  # Skip older duplicate for this stock
+            seen_accepted.add(rec.stock_id)
             holding = holdings_by_symbol.get(stock.symbol)
             pnl = _pnl_for_accepted(rec, holding)
             accepted.append(_clean_dict({**base, **pnl, "is_accepted": True}))
         else:
+            if rec.stock_id in seen_not_accepted:
+                continue  # Skip older duplicate for this stock
+            seen_not_accepted.add(rec.stock_id)
             pnl = _pnl_for_notional(rec)
             not_accepted.append(_clean_dict({**base, **pnl, "is_accepted": False}))
 

@@ -600,6 +600,21 @@ async def run_full_scan() -> list[Recommendation]:
     held_symbols = await _get_held_symbols()
     inst_signals = await get_all_institutional_signals(lookback_days=30)
 
+    # Get stock_ids that already have an active delivered recommendation
+    # to avoid generating duplicate daily recs for the same stock
+    async with get_session() as session:
+        existing_active_result = await session.execute(
+            select(Recommendation.stock_id).where(
+                and_(
+                    Recommendation.is_delivered == True,
+                    Recommendation.watchlist_status.in_(["active", None]),
+                )
+            ).distinct()
+        )
+        already_active_stock_ids = {row[0] for row in existing_active_result.all()}
+
+    logger.info(f"Stocks with existing active recommendations: {len(already_active_stock_ids)}")
+
     # Fetch live prices from Kite API (if authenticated)
     live_prices: dict[str, float] = {}
     try:
@@ -626,10 +641,16 @@ async def run_full_scan() -> list[Recommendation]:
     skip_pre_score = 0
     skip_cmp_entry_deviation = 0
     skip_low_rr = 0
+    skip_already_active = 0
 
     for stock in stocks:
         try:
             is_held = stock.symbol in held_symbols
+
+            # Skip stocks that already have an active delivered recommendation
+            if stock.id in already_active_stock_ids and not is_held:
+                skip_already_active += 1
+                continue
 
             # Price data is required for ALL stocks
             df = await _get_ohlcv_dataframe(stock.id)
@@ -739,7 +760,8 @@ async def run_full_scan() -> list[Recommendation]:
 
     logger.info(
         f"Pre-filter: {len(candidates)} candidates passed (threshold={PRE_SCORE_THRESHOLD}). "
-        f"Dropped: no_fundamental={skip_no_fundamental}, no_prices(<200d)={skip_no_prices}, "
+        f"Dropped: already_active={skip_already_active}, no_fundamental={skip_no_fundamental}, "
+        f"no_prices(<200d)={skip_no_prices}, "
         f"fund_hard_filter={skip_fund_hard_filter}, tech_hard_filter={skip_tech_hard_filter}, "
         f"pre_score_low={skip_pre_score}, cmp_entry_deviation={skip_cmp_entry_deviation}, "
         f"low_rr={skip_low_rr}"
