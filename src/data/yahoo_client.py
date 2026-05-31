@@ -95,6 +95,12 @@ async def save_ohlcv_to_db(stock_id: int, df: pd.DataFrame) -> int:
             if row_date in existing_dates:
                 continue
 
+            # Skip rows with NaN/Inf in any critical OHLCV field
+            ohlcv_vals = [row["Open"], row["High"], row["Low"], row["Close"], row["Volume"]]
+            if any(pd.isna(v) for v in ohlcv_vals):
+                logger.debug(f"Skipping NaN OHLCV row for stock_id={stock_id} on {row_date}")
+                continue
+
             price = StockPrice(
                 stock_id=stock_id,
                 date=row_date,

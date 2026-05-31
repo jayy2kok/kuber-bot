@@ -9,6 +9,7 @@ Responsibilities:
 """
 
 import logging
+import math
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -270,6 +271,13 @@ async def get_watchlist_data() -> dict:
     not_accepted = []
     last_refresh: Optional[datetime] = None
 
+
+    def _clean_dict(d: dict) -> dict:
+        for k, v in d.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                d[k] = 0.0
+        return d
+
     for rec in recs:
         stock = stocks_by_id.get(rec.stock_id)
         if not stock:
@@ -301,10 +309,10 @@ async def get_watchlist_data() -> dict:
         if rec.is_accepted:
             holding = holdings_by_symbol.get(stock.symbol)
             pnl = _pnl_for_accepted(rec, holding)
-            accepted.append({**base, **pnl, "is_accepted": True})
+            accepted.append(_clean_dict({**base, **pnl, "is_accepted": True}))
         else:
             pnl = _pnl_for_notional(rec)
-            not_accepted.append({**base, **pnl, "is_accepted": False})
+            not_accepted.append(_clean_dict({**base, **pnl, "is_accepted": False}))
 
     return {
         "accepted": accepted,

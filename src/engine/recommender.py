@@ -16,6 +16,7 @@ Pipeline:
 
 import asyncio
 import logging
+import math
 from datetime import date
 from typing import Optional
 
@@ -473,6 +474,11 @@ async def analyze_single_stock(stock: Stock) -> Optional[Recommendation]:
     except Exception:
         cmp = db_close
 
+    # Guard: skip if CMP is NaN (bad price data from Yahoo/DB)
+    if math.isnan(cmp) or math.isinf(cmp):
+        logger.warning(f"Skipping {stock.symbol}: CMP is NaN/Inf (bad price data)")
+        return None
+
     # ── Fundamental ──
     fundamental = await _get_latest_fundamental(stock.id)
     fund_result = None
@@ -634,6 +640,11 @@ async def run_full_scan() -> list[Recommendation]:
             # Use live Kite LTP if available, otherwise DB close
             db_close = float(df.iloc[-1]["Close"])
             cmp = live_prices.get(stock.symbol, db_close)
+
+            # Guard: skip if CMP is NaN (bad price data from Yahoo/DB)
+            if math.isnan(cmp) or math.isinf(cmp):
+                logger.warning(f"Skipping {stock.symbol}: CMP is NaN/Inf (bad price data)")
+                continue
 
             # Fundamental analysis
             fundamental = await _get_latest_fundamental(stock.id)
