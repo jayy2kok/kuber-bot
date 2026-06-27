@@ -2,7 +2,7 @@ name: Deploy to Oracle Cloud
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   deploy:
@@ -25,7 +25,7 @@ jobs:
             docker compose up -d --build
 
             # Pull the Ollama model (runs in background, idempotent)
-            docker exec kuber-ollama ollama pull gemma4:e2b || true
+            docker exec kuber-ollama ollama pull gemma4:26b || true
 
             # Clean up old images
             docker image prune -f
