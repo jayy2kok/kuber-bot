@@ -21,11 +21,12 @@ jobs:
             # Pull latest code
             git pull origin main
 
-            # Rebuild and restart
-            docker compose up -d --build
-
-            # Pull the Ollama model (runs in background, idempotent)
+            # Ensure Ollama is running and model is ready before fbot starts
+            docker compose up -d --build ollama
             docker exec kuber-ollama ollama pull gemma4:12b || true
+
+            # Rebuild and restart the full stack
+            docker compose up -d --build
 
             # Clean up old images
             docker image prune -f

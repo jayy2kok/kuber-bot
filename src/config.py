@@ -47,7 +47,7 @@ class Settings(BaseSettings):
         default="http://localhost:11434",
         description="Ollama server URL",
     )
-    ollama_model: str = Field(default="llama3", description="Ollama model for sentiment")
+    ollama_model: str = Field(default="gemma4:12b", description="Ollama model for sentiment")
 
     # ── NewsAPI (optional) ────────────────────────────────────────────
     news_api_key: str = Field(default="", description="NewsAPI.org key")
